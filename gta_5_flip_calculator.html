@@ -1,0 +1,312 @@
+<!doctype html>
+<html lang="ru">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>GTA5 — Калькулятор перепродаж</title>
+  <style>
+    :root{
+      --bg:#2b2e32;
+      --card:#383b40;
+      --accent:#7890ff;
+      --green:#2ecc71;
+      --red:#e74c3c;
+      --muted:#bfc6d1;
+      --glass: rgba(255,255,255,0.03);
+      --radius:12px;
+      font-family: Inter, system-ui, -apple-system, "Segoe UI", Roboto, "Helvetica Neue", Arial;
+    }
+    *{box-sizing:border-box}
+    html,body{height:100%;margin:0;background:linear-gradient(180deg,var(--bg),#232427);color:#fff}
+    .wrap{max-width:980px;margin:28px auto;padding:20px;display:grid;grid-template-columns:360px 1fr;gap:18px}
+    .card{background:var(--card);border-radius:var(--radius);padding:18px;box-shadow:0 8px 30px rgba(0,0,0,0.45)}
+
+    h1{margin:0 0 12px 0;font-size:20px}
+    label{display:block;font-size:13px;color:var(--muted);margin-bottom:6px}
+    input[type="number"], input[type="text"], select, textarea{width:100%;padding:10px;border-radius:10px;border:0;background:var(--glass);color:inherit;font-size:14px}
+    .row{display:flex;gap:10px}
+    .btn{display:inline-block;padding:10px 12px;border-radius:10px;border:0;background:var(--accent);color:#fff;font-weight:600;cursor:pointer}
+    .btn.ghost{background:transparent;border:1px solid rgba(255,255,255,0.06)}
+    .btn.green{background:var(--green)}
+    .btn.red{background:var(--red)}
+    .meta{font-size:13px;color:var(--muted);margin-top:8px}
+
+    .list{max-height:520px;overflow:auto;padding:8px;border-radius:10px;background:linear-gradient(180deg, rgba(255,255,255,0.01), transparent);}
+    .entry{display:flex;align-items:center;justify-content:space-between;padding:10px;border-radius:10px;margin-bottom:8px;background:rgba(0,0,0,0.12)}
+    .entry .left{min-width:0}
+    .entry .title{font-weight:700;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+    .entry .sub{font-size:12px;color:var(--muted)}
+    .amount{font-weight:800}
+    .profit.positive{color:var(--green)}
+    .profit.negative{color:var(--red)}
+
+    .top-stats{display:flex;gap:12px;margin-bottom:12px}
+    .stat{flex:1;padding:12px;border-radius:10px;background:rgba(0,0,0,0.08);text-align:center}
+    .stat .big{font-size:20px;font-weight:800}
+    .controls{display:flex;gap:8px;flex-wrap:wrap;margin-top:10px}
+
+    .small{font-size:13px;color:var(--muted)}
+
+    footer{grid-column:1/-1;text-align:center;color:var(--muted);margin-top:12px;font-size:13px}
+
+    @media (max-width:900px){.wrap{grid-template-columns:1fr;max-width:680px}}
+  </style>
+</head>
+<body>
+  <div class="wrap">
+    <div class="card" id="left">
+      <h1>GTA5 — Калькулятор перепродаж</h1>
+      <div class="top-stats">
+        <div class="stat">
+          <div class="small">Текущая прибыль</div>
+          <div class="big" id="curProfit">0 $</div>
+        </div>
+        <div class="stat">
+          <div class="small">Всего заработано</div>
+          <div class="big" id="totalProfit">0 $</div>
+        </div>
+      </div>
+
+      <div>
+        <label>Цена покупки ($)</label>
+        <input id="buyPrice" type="text" placeholder="Пример: 12 000" />
+
+        <label style="margin-top:10px">Цена продажи ($)</label>
+        <input id="sellPrice" type="text" placeholder="Пример: 15 000" />
+
+        <label style="margin-top:10px">Описание / Авто</label>
+        <input id="desc" type="text" placeholder="Например: Sultan RS — перепродажа" />
+
+        <div class="controls">
+          <button class="btn green" id="addBtn">Добавить перепродажу</button>
+          <button class="btn ghost" id="resetDay">Новый день (обнуляет текущую прибыль)</button>
+          <button class="btn ghost" id="clearAll">Удалить всё</button>
+        </div>
+
+        <div class="meta">Данные сохраняются в браузере и останутся после перезагрузки. Можно экспортировать/импортировать.</div>
+
+        <div style="margin-top:12px;display:flex;gap:8px">
+          <button class="btn" id="exportBtn">Экспорт JSON</button>
+          <button class="btn ghost" id="importBtn">Импорт JSON</button>
+          <input type="file" id="fileInput" style="display:none" accept="application/json" />
+        </div>
+      </div>
+    </div>
+
+    <div class="card">
+      <h1>История перепродаж</h1>
+      <div class="list" id="list"></div>
+    </div>
+
+    <footer>
+      Простой инструмент для учёта операций покупки/продажи в GTA5. <span id="clock"></span>
+    </footer>
+  </div>
+
+  <script>
+    // ======== Форматирование чисел ========
+    const format = (v)=>{
+      const n = Number(v) || 0;
+      return new Intl.NumberFormat('ru-RU',{maximumFractionDigits:2}).format(n)+" $";
+    }
+    const nowStr = ()=> new Date().toLocaleString();
+
+    const STORAGE_KEY = 'gta5-flips-v1';
+    let state = { entries: [], totalProfit:0, sessionProfit:0 };
+
+    function load(){
+      try{
+        const raw = localStorage.getItem(STORAGE_KEY);
+        if(raw){ state = JSON.parse(raw); }
+      }catch(e){ console.error(e); }
+    }
+    function save(){ localStorage.setItem(STORAGE_KEY, JSON.stringify(state)); }
+
+    // ======== DOM ссылки ========
+    const buyPrice = document.getElementById('buyPrice');
+    const sellPrice = document.getElementById('sellPrice');
+    const desc = document.getElementById('desc');
+    const addBtn = document.getElementById('addBtn');
+    const listEl = document.getElementById('list');
+    const curProfitEl = document.getElementById('curProfit');
+    const totalProfitEl = document.getElementById('totalProfit');
+    const resetDayBtn = document.getElementById('resetDay');
+    const clearAllBtn = document.getElementById('clearAll');
+    const exportBtn = document.getElementById('exportBtn');
+    const importBtn = document.getElementById('importBtn');
+    const fileInput = document.getElementById('fileInput');
+    const clock = document.getElementById('clock');
+
+    // ======== Рендеринг списка ========
+    function render(){
+      listEl.innerHTML='';
+      state.entries.slice().reverse().forEach(e=>{
+        const div=document.createElement('div'); div.className='entry';
+        const left=document.createElement('div'); left.className='left';
+        const t=document.createElement('div'); t.className='title'; t.textContent=e.desc || '—';
+        const s=document.createElement('div'); s.className='sub'; s.textContent=`Куплено: ${format(e.buy)} — Продано: ${format(e.sell)} · ${e.time}`;
+        left.appendChild(t); left.appendChild(s);
+        const right=document.createElement('div'); right.style.textAlign='right';
+        const profit=document.createElement('div'); profit.className='amount profit '+(e.profit>=0?'positive':'negative'); profit.textContent=(e.profit>=0?'+':'')+format(e.profit);
+        const btns=document.createElement('div'); btns.style.marginTop='6px';
+        const del=document.createElement('button'); del.className='btn ghost'; del.textContent='Удалить';
+        del.onclick=()=>{ if(confirm('Удалить запись?')){ removeEntry(e.id); } };
+        btns.appendChild(del);
+        right.appendChild(profit); right.appendChild(btns);
+        div.appendChild(left); div.appendChild(right);
+        listEl.appendChild(div);
+      });
+
+      curProfitEl.textContent = format(state.sessionProfit);
+      totalProfitEl.textContent = format(state.totalProfit);
+      save();
+
+      renderFullHistory(searchInput.value);
+    }
+
+    function addEntry(buy,sell,desc){
+      const profit = Number((sell - buy).toFixed(2));
+      const entry = { id: Date.now()+Math.random().toString(36).slice(2,8), buy: buy, sell: sell, desc: desc, profit: profit, time: nowStr() };
+      state.entries.push(entry);
+      state.totalProfit = Number((Number(state.totalProfit) + profit).toFixed(2));
+      state.sessionProfit = Number((Number(state.sessionProfit) + profit).toFixed(2));
+      render();
+    }
+
+    function removeEntry(id){
+      const idx = state.entries.findIndex(e=>e.id===id);
+      if(idx!==-1){
+        const e = state.entries.splice(idx,1)[0];
+        state.totalProfit = Number((Number(state.totalProfit) - e.profit).toFixed(2));
+        state.sessionProfit = Number((Number(state.sessionProfit) - e.profit).toFixed(2));
+        render();
+      }
+    }
+
+    addBtn.addEventListener('click',()=>{
+      const buy = Number(buyPrice.value.replace(/\s/g,''));
+      const sell = Number(sellPrice.value.replace(/\s/g,''));
+      const d = desc.value.trim();
+      if(isNaN(buy) || isNaN(sell)) { alert('Введите корректные числа для покупки и продажи'); return; }
+      addEntry(buy,sell,d);
+      buyPrice.value=''; sellPrice.value=''; desc.value='';
+    });
+
+    resetDayBtn.addEventListener('click',()=>{
+      if(confirm('Сбросить текущую (сессионную) прибыль?\nЭто не удалит все записи, только обнулит «Текущая прибыль».')){
+        state.sessionProfit = 0; render();
+      }
+    });
+
+    clearAllBtn.addEventListener('click',()=>{
+      if(confirm('Удалить все записи и обнулить статистику? Это действие необратимо.')){
+        state = { entries: [], totalProfit:0, sessionProfit:0 }; render();
+      }
+    });
+
+    exportBtn.addEventListener('click',()=>{
+      const blob = new Blob([JSON.stringify(state,null,2)],{type:'application/json'});
+      const url = URL.createObjectURL(blob);
+      const a=document.createElement('a'); a.href=url; a.download='gta5-flips.json'; a.click(); URL.revokeObjectURL(url);
+    });
+
+    importBtn.addEventListener('click',()=> fileInput.click());
+    fileInput.addEventListener('change',async(e)=>{
+      const f = e.target.files[0]; if(!f) return;
+      try{
+        const txt = await f.text(); const parsed = JSON.parse(txt);
+        if(confirm('Импортировать файл и заменить текущие данные?')){ state = parsed; render(); }
+      }catch(err){ alert('Ошибка импорта — неправильный файл.'); }
+      fileInput.value='';
+    });
+
+    function tickClock(){ clock.textContent = new Date().toLocaleTimeString(); }
+    setInterval(tickClock,1000); tickClock();
+
+    // ======== Форматирование ввода для полей ========
+    function formatInputNumber(value){
+      if(!value) return '';
+      let num = value.replace(/[^\d]/g,''); // видаляємо все крім цифр
+      if(num) num = Number(num).toLocaleString('ru-RU');
+      return num;
+    }
+
+    buyPrice.addEventListener('input', (e)=>{
+      const pos = e.target.selectionStart;
+      e.target.value = formatInputNumber(e.target.value);
+      e.target.setSelectionRange(pos, pos);
+    });
+    sellPrice.addEventListener('input', (e)=>{
+      const pos = e.target.selectionStart;
+      e.target.value = formatInputNumber(e.target.value);
+      e.target.setSelectionRange(pos, pos);
+    });
+
+    load(); render();
+  </script>
+
+  <!-- ===== РАСШИРЕНА ІСТОРІЯ З УМНИМ ПОШУКОМ ===== -->
+  <div class="card" style="max-width:980px;margin:20px auto;">
+    <h1>Расширенная история покупок</h1>
+
+    <!-- Поиск -->
+    <div style="margin-bottom:12px;">
+      <input type="text" id="searchInput" placeholder="Поиск по названию авто/описанию..." 
+        style="width:100%;padding:8px;border-radius:8px;border:0;background:rgba(255,255,255,0.03);color:#fff;font-size:14px;" />
+    </div>
+
+    <div style="overflow:auto; max-height:480px;">
+      <table id="fullHistory" style="width:100%; border-collapse:collapse; font-size:14px;">
+        <thead>
+          <tr style="background:rgba(255,255,255,0.05);">
+            <th style="padding:8px; text-align:left;">Авто</th>
+            <th style="padding:8px; text-align:left;">Куплено</th>
+            <th style="padding:8px; text-align:left;">Продано</th>
+            <th style="padding:8px; text-align:left;">Прибыль</th>
+            <th style="padding:8px; text-align:left;">Дата</th>
+          </tr>
+        </thead>
+        <tbody id="fullHistoryBody"></tbody>
+      </table>
+    </div>
+  </div>
+
+  <script>
+    const searchInput = document.getElementById('searchInput');
+
+    function renderFullHistory(search=""){
+      const body = document.getElementById('fullHistoryBody');
+      if(!body) return;
+
+      body.innerHTML = '';
+      const query = search.trim().toLowerCase();
+      const words = query.split(/[\s.]+/).filter(Boolean);
+
+      state.entries.forEach(e=>{
+        const desc = (e.desc || "").toLowerCase();
+        if(words.length && !words.every(w => desc.includes(w))) return;
+
+        const tr = document.createElement('tr');
+        tr.style.borderBottom = "1px solid rgba(255,255,255,0.05)";
+        tr.innerHTML = `
+          <td style="padding:8px;">${e.desc || "—"}</td>
+          <td style="padding:8px;">${format(e.buy)}</td>
+          <td style="padding:8px;">${format(e.sell)}</td>
+          <td style="padding:8px; font-weight:700; color:${e.profit>=0 ? "#2ecc71" : "#e74c3c"}">
+            ${(e.profit>=0?'+':'') + format(e.profit)}
+          </td>
+          <td style="padding:8px;">${e.time}</td>
+        `;
+        body.appendChild(tr);
+      });
+    }
+
+    searchInput.addEventListener('input', ()=>{
+      renderFullHistory(searchInput.value);
+    });
+
+    renderFullHistory();
+  </script>
+
+</body>
+</html>
